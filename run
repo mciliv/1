@@ -18,8 +18,12 @@ function printHelp() {
   console.log(`Usage: ./run <command> [args]
 
 Commands:
-  start             Start server (builds frontend bundle if missing)
-  server            Alias for start
+  start             Start server in background (default)
+  foreground, -f    Start server in foreground (see mixed logs)
+  pm2:logs          Stream PM2 server logs
+  pm2:monit         Show PM2 process monitor
+  pm2:stop          Stop PM2 server
+  show              Open browser to localhost:8080
   dev               Watch frontend + run server (both as child processes)
   debug-brk         Start server with --inspect-brk
   build             Build frontend bundle
@@ -85,6 +89,14 @@ async function waitForServer({ url = 'http://localhost:8080/health', maxAttempts
 }
 
 async function cmdStart() {
+  await cmdPM2Start();
+}
+
+async function cmdShow() {
+  runScript('open', ['http://localhost:8080']);
+}
+
+async function cmdForeground() {
   killPort(8080);
 
   if (!fs.existsSync(FRONTEND_BUNDLE)) {
@@ -94,7 +106,43 @@ async function cmdStart() {
   }
 
   const server = runNode(SERVER_ENTRY);
+  
+  await sleep(1500); // Give server a moment
+  const ok = await waitForServer();
+  if (ok) {
+    console.log('🌐 Server ready, opening browser at http://localhost:8080');
+    runScript('open', ['http://localhost:8080']);
+  }
+
   server.on('exit', (code) => process.exit(code ?? 0));
+}
+
+async function cmdPM2Start() {
+  killPort(8080);
+  
+  if (!fs.existsSync(FRONTEND_BUNDLE)) {
+    console.log('📦 Building frontend bundle...');
+    const res = spawnSync(process.execPath, [FRONTEND_BUILD, '--quiet'], { stdio: 'inherit' });
+    if (res.status !== 0) process.exit(res.status || 1);
+  }
+
+  console.log('🚀 Starting server in background via PM2...');
+  // Pass current environment (like AUTO_TEST_INJECT) to PM2
+  runScript('npx', ['pm2', 'start', 'ecosystem.config.cjs', '--update-env']);
+  await sleep(2000);
+  runScript('open', ['http://localhost:8080']);
+}
+
+async function cmdPM2Logs() {
+  runScript('npx', ['pm2', 'logs', '1-server']);
+}
+
+async function cmdPM2Monit() {
+  runScript('npx', ['pm2', 'monit']);
+}
+
+async function cmdPM2Stop() {
+  runScript('npx', ['pm2', 'stop', '1-server']);
 }
 
 async function cmdBuild() {
@@ -221,7 +269,15 @@ async function main() {
 
   const commands = {
     start: cmdStart,
+    foreground: cmdForeground,
+    fg: cmdForeground,
+    '-f': cmdForeground,
     server: cmdStart,
+    show: cmdShow,
+    'pm2:start': cmdPM2Start,
+    'pm2:logs': cmdPM2Logs,
+    'pm2:monit': cmdPM2Monit,
+    'pm2:stop': cmdPM2Stop,
     build: cmdBuild,
     dev: cmdDev,
     'debug-brk': cmdDebugBrk,
@@ -234,9 +290,22 @@ async function main() {
 
   const fn = commands[cmd];
   if (!fn) {
-    console.error(`Unknown command: ${cmd}`);
-    printHelp();
-    process.exit(1);
+    // Check if server is running
+    const isRunning = await waitForServer({ maxAttempts: 1 });
+    
+    if (isRunning) {
+      // Just run CLI against existing server
+      console.log(`🚀 Forwarding to 1 CLI: ${argv.join(' ')}`);
+      const cliScript = path.join(PROJECT_ROOT, 'scripts', '1.mjs');
+      const child = spawn(process.execPath, [cliScript, ...argv], { stdio: 'inherit' });
+      child.on('exit', (code) => process.exit(code ?? 0));
+    } else {
+      // Start server with this query as the initial state
+      console.log(`🚀 Starting server + analyzing: ${argv.join(' ')}`);
+      process.env.AUTO_TEST_INJECT = argv.join(' ');
+      await cmdStart();
+    }
+    return;
   }
 
   await fn();
