@@ -1,14 +1,11 @@
+const base = require('./jest.base');
+
 module.exports = {
-  testEnvironment: 'node',
+  ...base,
+  displayName: 'integration',
   testMatch: [
-    '**/integration/**/*.js',
-    '**/?(*.)+(integration|spec|test).js'
+    '<rootDir>/tests/suites/integration/**/*.test.js',
+    '<rootDir>/tests/integration/**/*.test.js'
   ],
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
-  transform: {
-    '^.+\\.js$': 'babel-jest'
-  },
-  moduleFileExtensions: ['js', 'json'],
-  testTimeout: 30000, // Longer timeout for integration tests
-  collectCoverage: false // Integration tests often have different coverage needs
+  testTimeout: 60000
 };

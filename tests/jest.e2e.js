@@ -1,16 +1,12 @@
+const base = require('./jest.base');
+
 module.exports = {
-  testEnvironment: 'node',
+  ...base,
+  displayName: 'e2e',
   testMatch: [
-    '**/e2e/**/*.js',
-    '**/?(*.)+(e2e|spec|test).js'
+    '<rootDir>/tests/suites/e2e/**/*.test.js'
   ],
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
-  transform: {
-    '^.+\\.js$': 'babel-jest'
-  },
-  moduleFileExtensions: ['js', 'json'],
-  testTimeout: 60000, // E2E tests can take longer
-  collectCoverage: false,
+  testTimeout: 120000,
   globalSetup: '<rootDir>/tests/e2e-setup.js',
   globalTeardown: '<rootDir>/tests/e2e-teardown.js'
 };

@@ -5,8 +5,14 @@
 // Load environment variables for testing (optional)
 // require('../src/core/services');
 
+// Polyfill window.matchMedia for jsdom (used by device.js, xterm, etc.)
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = () => ({ matches: false, addListener: () => {}, removeListener: () => {} });
+}
+
 // Mock fetch globally for tests (skip smoke tests)
-const isSmokeTest = process.env.npm_lifecycle_event === 'test:smoke'; // user prompt: "finish"
+const isSmokeTest = process.env.npm_lifecycle_event === 'test:smoke' || 
+                   (typeof expect !== 'undefined' && expect.getState().testPath.includes('smoke.test.js'));
 if (!isSmokeTest) {
   global.fetch = jest.fn();
 }

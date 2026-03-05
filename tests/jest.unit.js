@@ -1,20 +1,16 @@
+const base = require('./jest.base');
+
 module.exports = {
-  rootDir: '..',
-  testEnvironment: 'node',
+  ...base,
+  displayName: 'unit',
   testMatch: [
     '<rootDir>/tests/suites/unit/**/*.test.js',
     '<rootDir>/tests/unit/**/*.spec.js',
     '<rootDir>/tests/unit/**/*.test.js'
   ],
   collectCoverageFrom: [
-    'src/**/*.js',
-    '!src/**/*.test.js',
-    '!src/**/*.spec.js'
-  ],
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
-  transform: {
-    '^.+\\.js$': 'babel-jest'
-  },
-  moduleFileExtensions: ['js', 'json'],
-  testTimeout: 10000
+    'src/**/*.{js,jsx}',
+    '!src/**/*.test.{js,jsx}',
+    '!src/**/*.spec.{js,jsx}'
+  ]
 };

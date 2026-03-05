@@ -18,7 +18,7 @@ describe('POST /api/log-error - Clean Architecture Integration', () => {
 
     // Override the use-case directly to use our mock port
     container.register('logErrorUseCase', () => {
-      const LogErrorUseCase = require('../../../src/server/services/log-error-use-case');
+      const LogErrorUseCase = require('@/server/services/log-error-use-case');
       return new LogErrorUseCase({ logErrorPort: mockLogErrorPort });
     });
 

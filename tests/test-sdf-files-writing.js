@@ -163,7 +163,7 @@ function testPythonSDFScript() {
   console.log('\n🐍 Testing Python SDF Script...\n');
   
   return new Promise((resolve) => {
-    const pythonScript = path.join(__dirname, '../src/server/molecular-docking-research/sdf.py');
+    const pythonScript = path.join(__dirname, '../src/server/sdf.py');
     const args = [pythonScript, 'CCO', '--dir', TEST_SDF_DIR];
     
     const child = spawn('python', args, {
