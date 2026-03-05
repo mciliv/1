@@ -175,7 +175,7 @@ const startServers = async (app, configuration, initializeDatabase) => {
           // Auto-inject test case if specified
           const autoTestInject = process.env.AUTO_TEST_INJECT;
           if (autoTestInject) {
-            logger.info(`🧪 Auto-injection enabled for test case: ${autoTestInject}`);
+            logger.info(`🧪 Auto-injection enabled for: ${autoTestInject}`);
             // Wait a moment for server to be fully ready, then inject
             setTimeout(async () => {
               try {
@@ -187,8 +187,13 @@ const startServers = async (app, configuration, initializeDatabase) => {
                   await injectPrediction(testCases[autoTestInject]);
                   logger.success(`✅ Auto-injection completed for: ${autoTestInject}`);
                 } else {
-                  logger.warn(`⚠️ Unknown test case for auto-injection: ${autoTestInject}`);
-                  logger.info(`Available: ${Object.keys(testCases).join(', ')}`);
+                  // If not a predefined test case, treat as a real query
+                  logger.info(`🔍 Performing real-time analysis for: ${autoTestInject}`);
+                  const container = require('../../../src/core/services').getContainer();
+                  const structuralizer = await container.get('structuralizer');
+                  const result = await structuralizer.structuralize(autoTestInject, 'GPT-5');
+                  await injectPrediction(result);
+                  logger.success(`✅ Auto-injection completed for: ${autoTestInject}`);
                 }
               } catch (error) {
                 logger.warn(`⚠️ Auto-injection failed: ${error.message}`);

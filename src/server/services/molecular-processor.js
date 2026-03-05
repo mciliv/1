@@ -212,7 +212,7 @@ class MolecularProcessor {
     } catch (_) {}
 
     // Fall back to local Python/rdkit for novel or unlisted SMILES
-    const pythonScript = path.join(__dirname, "molecular-docking-research", "sdf.py");
+    const pythonScript = path.join(__dirname, "..", "sdf.py");
     const args = [pythonScript, chemical, "--dir", this.sdfDir];
     const { spawn } = require("child_process");
 

@@ -37,7 +37,7 @@ async function createApp({ config, logger, container }) {
       const cacheBust = Date.now();
 
       htmlContent = htmlContent
-        .replace(/\{\{TITLE\}\}/g, 'Queb - Molecular Analysis')
+        .replace(/\{\{TITLE\}\}/g, '1 - Molecular Analysis')
         .replace(/\{\{DESCRIPTION\}\}/g, '3D visualization of chemical contents by camera or text input.')
         .replace(/\{\{CANONICAL\}\}/g, `${baseUrl}${req.path}`)
         .replace(/\{\{OG_IMAGE\}\}/g, '/assets/favicon.svg')
@@ -227,9 +227,10 @@ async function setupChemicalPredictionRoutes(app, { logger, container }) {
         });
       }
 
-      if (typeof lookupMode !== 'string') {
+      const allowedModes = ['GPT-5', 'O1', 'CLAUDE-3', 'LOCAL'];
+      if (typeof lookupMode !== 'string' || !allowedModes.includes(lookupMode.toUpperCase())) {
         return res.status(400).json({
-          error: 'Invalid "lookupMode" parameter',
+          error: 'Invalid "lookupMode" parameter. Allowed: ' + allowedModes.join(', '),
         });
       }
 

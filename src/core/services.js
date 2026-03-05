@@ -203,9 +203,8 @@ const config = {
     return {
       nodeEnv: configData.nodeEnv,
       port: configData.port,
-      hasOpenAIKey: !!configData.openai.apiKey,
-      databaseEnabled: configData.database.enabled,
-      nodeEnv: configData.nodeEnv
+      hasOpenAIKey: !!configData.ai.openai.apiKey,
+      databaseEnabled: configData.database.enabled
     };
   }
 };
@@ -254,13 +253,13 @@ function createContainer(overrides = {}) {
 
 
   container.register('database', async () => {
-    const Database = require('../server/services/database');
+    const database = require('../server/services/database');
 
     if (!config.database.enabled) {
       return null;
     }
 
-    return new Database(config.getDatabaseConfig());
+    return database.initializeDatabase();
   }, {
     tags: ['data', 'storage']
   });
