@@ -6,19 +6,9 @@ func expandedURL(from path: String) -> URL {
     return URL(fileURLWithPath: expanded)
 }
 
-// Optional console (commented)
-func createConsoleConfiguration() -> VZSerialPortConfiguration {
-    let attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: FileHandle.standardInput, fileHandleForWriting: FileHandle.standardOutput)
-    let config = VZVirtioConsoleDeviceSerialPortConfiguration()
-    config.attachment = attachment
-    return config
-}
-
 let virtualMachineConfiguration = VZVirtualMachineConfiguration()
 virtualMachineConfiguration.cpuCount = 2
 virtualMachineConfiguration.memorySize = 2 * 1024 * 1024 * 1024 
-
-// virtualMachineConfiguration.serialPorts = [createConsoleConfiguration()]
 
 let outputStream = VZVirtioSoundDeviceOutputStreamConfiguration()
 outputStream.sink = VZHostAudioOutputStreamSink()
@@ -32,44 +22,18 @@ inputSoundDevice.streams = [inputStream]
 
 virtualMachineConfiguration.audioDevices = [outputSoundDevice, inputSoundDevice]
 
-let preferredISOPath = "~/Downloads/ubuntu-25.10-desktop-arm64.iso"
-var ubuntuISOURL = expandedURL(from: preferredISOPath)
-
-if !FileManager.default.fileExists(atPath: ubuntuISOURL.path) {
-    let downloadsURL = expandedURL(from: "~/Downloads")
-    if let iso = try? FileManager.default.contentsOfDirectory(at: downloadsURL, includingPropertiesForKeys: nil)
-        .first(where: { $0.pathExtension.lowercased() == "iso" }) {
-        ubuntuISOURL = iso
-    }
-}
-
-guard FileManager.default.fileExists(atPath: ubuntuISOURL.path) else {
-    fatalError("Ubuntu ISO not found. Download arm64 desktop ISO to ~/Downloads.")
-}
-
 let supportDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/UbuntuVM", isDirectory: true)
 try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
 let diskImageURL = supportDir.appendingPathComponent("disk.img")
-if !FileManager.default.fileExists(atPath: diskImageURL.path) {
-    let fd = open(diskImageURL.path, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR)
-    if fd == -1 {
-        fatalError("Failed to create disk image at \(diskImageURL.path)")
-    }
-    let size: off_t = 20 * 1024 * 1024 * 1024
-    if ftruncate(fd, size) != 0 {
-        close(fd)
-        fatalError("Failed to size disk image to 20GB")
-    }
-    close(fd)
+
+guard FileManager.default.fileExists(atPath: diskImageURL.path) else {
+    fatalError("Disk not found. Run vm.swift (installer) first to create/install.")
 }
 
 let writableAttachment = try VZDiskImageStorageDeviceAttachment(url: diskImageURL, readOnly: false)
 let writableDisk = VZVirtioBlockDeviceConfiguration(attachment: writableAttachment)
 
-let isoAttachment = try VZDiskImageStorageDeviceAttachment(url: ubuntuISOURL, readOnly: true)
-let isoDisk = VZVirtioBlockDeviceConfiguration(attachment: isoAttachment)
-
-virtualMachineConfiguration.storageDevices = [writableDisk, isoDisk]
+virtualMachineConfiguration.storageDevices = [writableDisk]
 
 let graphicsDevice = VZVirtioGraphicsDeviceConfiguration()
 let scanout = VZVirtioGraphicsScanoutConfiguration(widthInPixels: 1920, heightInPixels: 1080)
@@ -86,7 +50,7 @@ let virtualMachine = VZVirtualMachine(configuration: virtualMachineConfiguration
 virtualMachine.start { result in
   switch result {
   case .success:
-    print("VM started successfully. Install Ubuntu in graphics window. Use Ctrl+C to stop.")
+    print("Ubuntu VM booted from disk. Ctrl+C to stop.")
   case .failure(let error):
     fatalError("VM start failed: \(error)")
   }
