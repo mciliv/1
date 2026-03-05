@@ -225,7 +225,7 @@
     }
   },
   "integration_with_queb": {
-    "current_state": "Queb queries individual compounds by name or SMILES",
+    "current_state": "1 queries individual compounds by name or SMILES",
     "enhancement_opportunity": "Add organism-based querying to get all chemicals for a biological context",
     "use_cases": [
       "User enters 'SARS-CoV-2' → Get all tested antiviral compounds",

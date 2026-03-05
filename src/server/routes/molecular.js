@@ -133,7 +133,7 @@ const setupMolecularRoutes = (chemicals, molecularProcessor, resolveName) => {
 
   /**
    * 
-   * This is the primary API endpoint that powers Queb
+   * This is the primary API endpoint that powers 1
    * It accepts various input types and returns identified chemical compounds.
    * 
    * Request flow:

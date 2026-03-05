@@ -1,5 +1,5 @@
 /**
- * Queb Client Hooks
+ * 1 Client Hooks
  * 
  * These hooks provide clear, user-focused interfaces for different
  * aspects of molecular analysis. Each hook is designed around a

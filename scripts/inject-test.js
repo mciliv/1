@@ -2,7 +2,7 @@
 /**
  * Test Injection Script - Triggers analysis in live running app
  * 
- * This script makes HTTP requests to a running Queb server to trigger
+ * This script makes HTTP requests to a running 1 server to trigger
  * molecular analysis, simulating user input but via API calls.
  * Perfect for development workflows where you want to see results
  * immediately in the live app.

@@ -274,7 +274,7 @@
     "data_formats": "Support SDF, MOL, SMILES, InChI for maximum compatibility."
   },
   "queb_integration": {
-    "current": "Queb currently uses PubChem REST API for SDF retrieval",
+    "current": "1 currently uses PubChem REST API for SDF retrieval",
     "endpoints_used": [
       "/rest/pug/compound/name/{name}/SDF?record_type=3d",
       "/rest/pug/compound/cid/{cid}/SDF?record_type=3d"

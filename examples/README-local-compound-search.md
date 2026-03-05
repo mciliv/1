@@ -178,9 +178,9 @@ Expected JSON format:
 - **Scalability**: Handles thousands of compounds efficiently
 - **Caching**: Automatic persistence to avoid re-fetching data
 
-## Integration with Queb
+## Integration with 1
 
-This service integrates with the existing Queb molecular processing pipeline:
+This service integrates with the existing 1 molecular processing pipeline:
 
 ```javascript
 const { resolveName } = require('./name-resolver');
