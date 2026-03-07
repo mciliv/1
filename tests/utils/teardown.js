@@ -11,15 +11,7 @@ module.exports = async (globalConfig) => {
 
   // Clean up test files if not in CI
   if (!process.env.CI) {
-    const testSdfDir = path.join(__dirname, '../../public/sdf_files/test');
-    if (fs.existsSync(testSdfDir)) {
-      try {
-        fs.rmSync(testSdfDir, { recursive: true, force: true });
-        console.log('Cleaned up test SDF files');
-      } catch (error) {
-        console.warn('Failed to clean up test SDF files:', error.message);
-      }
-    }
+    // data/sdf is the shared cache — don't delete it after tests
   }
 
   // Close any open database connections

@@ -39,10 +39,9 @@ class MolecularProcessor {
    */
   constructor(sdfDir) {
     if (!sdfDir) {
-      sdfDir = process.env.NODE_ENV === 'test' ? 'tests/sdf_files' : 'public/sdf_files';
+      sdfDir = 'data/sdf';
     }
     // __dirname is src/server/services — go up 3 levels to reach project root
-    // Prompt: molecular-processor.js line 44 — path must resolve to <root>/public/sdf_files
     this.sdfDir = path.join(__dirname, "..", "..", "..", sdfDir);
     this.ensureSdfDirectory();
   }
@@ -187,16 +186,9 @@ class MolecularProcessor {
       }
     }
 
-    // Generate from SMILES
-    try {
-      const sdfPath = await this.generateSmilesSDF(smiles);
-      if (sdfPath) return sdfPath;
-    } catch (error) {
-      // Fallback to bundled SDFs for common SMILES if Python is unavailable
-      const fallback = this.copyFallbackSdf(smiles);
-      if (fallback) return fallback;
-      throw error;
-    }
+    // Generate from SMILES (PubChem, then Python/RDKit)
+    const sdfPath = await this.generateSmilesSDF(smiles);
+    if (sdfPath) return sdfPath;
 
     return null;
   }
@@ -242,50 +234,18 @@ class MolecularProcessor {
       if (existing) return existing;
     }
 
-    const fallbackPath = this.copyFallbackSdf(chemical);
-    if (fallbackPath) return fallbackPath;
-
     const errorMsg = `SMILES generation failed for: ${chemical.substring(0, 50)}${chemical.length > 50 ? '...' : ''}`;
     throw new Error(errorMsg);
   }
 
-  copyFallbackSdf(smiles) {
-    try {
-      const fallbackDir = path.join(__dirname, "..", "..", "tests", "sdf_files");
-      const filenames = [
-        `${smiles}.sdf`,
-        this.generateSafeFilename(smiles),
-        `${smiles.replace(/[^a-zA-Z0-9]/g, ch => ch === "=" ? "__" : "_")}.sdf`,
-      ];
-      for (const name of filenames) {
-        const src = path.join(fallbackDir, name);
-        if (fs.existsSync(src)) {
-          const dest = path.join(this.sdfDir, name);
-          if (!fs.existsSync(dest)) {
-            fs.copyFileSync(src, dest);
-          }
-          return `/sdf_files/${name}`;
-        }
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
   generateSafeFilename(smiles) {
-    // Create a hash for long SMILES to avoid filesystem limits and display issues
     const cleanedName = smiles.replace(/[^a-zA-Z0-9]/g, ch => ch === "=" ? "__" : "_");
-    
-    // If the cleaned filename would be too long for display or filesystem
-    if (cleanedName.length > 50) {
+    // Only hash if the filename would exceed filesystem limits (255 bytes)
+    if (cleanedName.length + 4 > 200) {
       const hash = crypto.createHash('md5').update(smiles).digest('hex').substring(0, 12);
-      // Include first few characters for recognition + hash
-      const prefix = cleanedName.substring(0, 8);
+      const prefix = cleanedName.substring(0, 40);
       return `${prefix}_${hash}.sdf`;
     }
-    
-    // For shorter SMILES, use the cleaned version
     return `${cleanedName}.sdf`;
   }
 

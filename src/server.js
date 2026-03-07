@@ -108,10 +108,9 @@ app.use('/dist', express.static(distPath));
 app.use(express.static(distPath, { index: false }));
 
 // Serve SDF files
-const sdfDir = path.join(__dirname, 'src', 'public', 'sdf_files');
-if (fs.existsSync(sdfDir)) {
-  app.use('/sdf_files', express.static(sdfDir));
-}
+const sdfDir = path.join(__dirname, 'data', 'sdf');
+if (!fs.existsSync(sdfDir)) fs.mkdirSync(sdfDir, { recursive: true });
+app.use('/sdf_files', express.static(sdfDir));
 
 // Health check
 app.get('/api/health', (req, res) => {

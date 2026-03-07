@@ -64,7 +64,7 @@ const setupMolecularRoutes = (chemicals, molecularProcessor, resolveName) => {
       __dirname,
       "..",
       "..",
-      process.env.NODE_ENV === "test" ? "tests/sdf_files" : "public/sdf_files"
+      "data/sdf"
     );
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     return dir;

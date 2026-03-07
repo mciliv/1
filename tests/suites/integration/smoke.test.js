@@ -176,7 +176,7 @@ describe("Smoke Tests - Critical App Validation", () => {
     });
 
     test("should have proper directory structure", () => {
-      const requiredDirs = ["../../../tests", "../../../tests/sdf_files"];
+      const requiredDirs = ["../../../tests", "../../../data/sdf"];
 
       requiredDirs.forEach((dir) => {
         const dirPath = path.join(__dirname, dir);

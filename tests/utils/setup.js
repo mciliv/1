@@ -12,7 +12,7 @@ module.exports = async () => {
     path.join(__dirname, '../coverage'),
     path.join(__dirname, '../reports'),
     path.join(__dirname, '../screenshots'),
-    path.join(__dirname, '../../public/sdf_files/test')
+    path.join(__dirname, '../../data/sdf')
   ];
 
   testDirs.forEach(dir => {

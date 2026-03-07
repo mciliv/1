@@ -10,7 +10,17 @@ module.exports = {
   ],
   collectCoverageFrom: [
     'src/**/*.{js,jsx}',
+    '!src/client/dist/**',
     '!src/**/*.test.{js,jsx}',
     '!src/**/*.spec.{js,jsx}'
-  ]
+  ],
+  coverageDirectory: '<rootDir>/coverage',
+  coverageThreshold: {
+    global: {
+      branches: 10,
+      functions: 10,
+      lines: 10,
+      statements: 10
+    }
+  }
 };

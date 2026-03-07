@@ -11,8 +11,14 @@ src/client/dist/bundle.css
 src/client/dist/bundle.js.map
 src/client/dist/bundle.css.map
 
-# Generated SDF files
-public/sdf_files/
+# SDF cache (downloaded/generated molecular structures)
+data/sdf/
+tests/sdf_files/
+src/public/sdf_files/
+
+# Test coverage reports
+coverage/
+tests/coverage/
 
 # Chrome profile and cache
 .chrome-profile/

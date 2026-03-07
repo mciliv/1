@@ -49,7 +49,7 @@ describe("Unit Tests", () => {
     describe("constructor and initialization", () => {
       test("should initialize with default sdf directory", () => {
         const processor = new MolecularProcessor();
-        expect(processor.sdfDir).toContain("tests/sdf_files");
+        expect(processor.sdfDir).toContain("data/sdf");
       });
 
       test("should initialize with custom sdf directory", () => {

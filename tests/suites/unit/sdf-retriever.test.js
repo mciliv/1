@@ -36,7 +36,7 @@ describe('SDF Retriever Unit Tests', () => {
   describe('File System Operations', () => {
     test('should check multiple SDF directories in order', () => {
       fs.existsSync.mockImplementation((filePath) => {
-        return filePath.includes('backend/sdf_files') || filePath.includes('tests/sdf_files');
+        return filePath.includes('backend/sdf_files') || filePath.includes('data/sdf');
       });
 
       fs.readdirSync.mockReturnValue(['CCO.sdf', 'caffeine.sdf', 'aspirin.sdf']);
@@ -208,7 +208,7 @@ describe('SDF Retriever Unit Tests', () => {
     test('should use correct SDF directory paths', () => {
       const expectedPaths = [
         'src/backend/sdf_files',
-        'tests/sdf_files'
+        'data/sdf'
       ];
 
       expectedPaths.forEach(expectedPath => {
