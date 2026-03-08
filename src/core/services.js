@@ -295,6 +295,24 @@ function createContainer(overrides = {}) {
     tags: ['chemistry', 'processing']
   });
 
+  // ===== Material Scene Builder =====
+  container.register('materialSceneBuilder', async (c) => {
+    const MaterialSceneBuilder = require('../server/services/material-scene-builder');
+    return new MaterialSceneBuilder({ logger: await c.get('logger') });
+  });
+
+  // ===== Delivery Service =====
+  container.register('deliveryService', async (c) => {
+    const DeliveryService = require('../server/services/delivery-service');
+    return new DeliveryService({
+      aiService: await c.get('aiService'),
+      promptEngine: await c.get('promptEngine'),
+      logger: await c.get('logger')
+    });
+  }, {
+    tags: ['delivery', 'business']
+  });
+
   // ===== Business Services =====
   container.register('structuralizer', async (c) => {
     const Structuralizer = require('../server/services/Structuralizer');
@@ -306,6 +324,7 @@ function createContainer(overrides = {}) {
       promptEngine: await c.get('promptEngine'),
       errorHandler: await c.get('errorHandler'),
       logger: await c.get('logger'),
+      materialSceneBuilder: await c.get('materialSceneBuilder'),
       config: await c.get('config')
     });
   });

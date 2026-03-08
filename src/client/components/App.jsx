@@ -104,17 +104,24 @@ function App() {
   const [showLeftSidebar, setShowLeftSidebar] = useState(true); // New state for sidebar visibility
   const [showTerminal, setShowTerminal] = useState(true); // Toggle terminal mode
 
-  const { structuresFromText: analyzeText, generateSDFs } = useApi();
+  const { structuresFromText: analyzeText, generateSDFs, materialScene } = useApi();
 
-  // Load 3Dmol.js once at app start
+  // Load 3Dmol.js and NGL Viewer once at app start
   useEffect(() => {
-    if (typeof window.$3Dmol !== 'undefined') return;
-    if (document.getElementById('threedmol-script')) return;
-    const script = document.createElement('script');
-    script.id = 'threedmol-script';
-    script.src = 'https://3Dmol.org/build/3Dmol-min.js';
-    script.async = true;
-    document.head.appendChild(script);
+    if (typeof window.$3Dmol === 'undefined' && !document.getElementById('threedmol-script')) {
+      const script = document.createElement('script');
+      script.id = 'threedmol-script';
+      script.src = 'https://3Dmol.org/build/3Dmol-min.js';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+    if (typeof window.NGL === 'undefined' && !document.getElementById('ngl-script')) {
+      const script = document.createElement('script');
+      script.id = 'ngl-script';
+      script.src = 'https://unpkg.com/ngl@2.3.1/dist/ngl.js';
+      script.async = true;
+      document.head.appendChild(script);
+    }
   }, []);
 
   // Ensure accumulate mode during visual tests
@@ -239,11 +246,63 @@ function App() {
     setColumns(prev => columnMode === 'replace' ? [newColumn] : [...prev, newColumn]);
 
     try {
+      // Step 1: Try material-scene pipeline first
+      let useMoleculePipeline = false;
+      try {
+        const msResult = await materialScene(value);
+        const vizMode = msResult.visualization_mode;
+
+        if (vizMode === 'protein' && msResult.pdbId) {
+          // Protein — render with NGL Viewer
+          updateColumn(columnId, {
+            visualizationMode: 'protein',
+            pdbId: msResult.pdbId,
+            proteinName: msResult.proteinName || msResult.object,
+            description: msResult.description,
+            viewers: [],
+            loading: false,
+            failed: false
+          });
+          setObjectInput('');
+          return;
+        } else if (vizMode === 'crystal' || vizMode === 'liquid' || vizMode === 'gas') {
+          // Scene data available — render with SceneViewer
+          updateColumn(columnId, {
+            sceneData: msResult.sceneData,
+            visualizationMode: vizMode,
+            description: msResult.description,
+            viewers: [],
+            loading: false,
+            failed: false
+          });
+          setObjectInput('');
+          return;
+        } else if (vizMode === 'text') {
+          // Too complex for atomic viz — show text description
+          updateColumn(columnId, {
+            textDescription: msResult.description || msResult.textDescription,
+            visualizationMode: 'text',
+            viewers: [],
+            loading: false,
+            failed: false
+          });
+          setObjectInput('');
+          return;
+        } else {
+          // molecule mode — fall through to existing pipeline
+          useMoleculePipeline = true;
+        }
+      } catch (msError) {
+        // Material scene failed — gracefully degrade to molecule pipeline
+        logger.warn('Material scene failed, falling back to molecule pipeline:', msError);
+        useMoleculePipeline = true;
+      }
+
+      // Step 2: Molecule pipeline (existing analyzeText + SDF generation)
       const result = await analyzeText(value, lookupMode);
       const molecules = result.molecules || result.chemicals || [];
 
       if (molecules && molecules.length > 0) {
-        // Prefer precomputed SDFs with canonical names
         const precomputed = molecules.filter(m => m.sdfPath);
         if (precomputed.length > 0) {
           const viewers = precomputed.map(m => ({
@@ -253,7 +312,6 @@ function App() {
           }));
           updateColumn(columnId, { viewers, loading: false, failed: false });
         } else {
-          // Legacy path: generate SDFs from SMILES
           const smilesArray = molecules.map(mol => mol.smiles).filter(Boolean);
           if (smilesArray.length > 0) {
             try {
@@ -270,26 +328,15 @@ function App() {
               });
               updateColumn(columnId, { viewers, loading: false, failed: false });
             } catch (sdfError) {
-              const isDev = process.env.NODE_ENV === 'development';
-              const errorDetails = sdfError.details || {};
-              const errorMsg = `generateSDFs() timed out: ${sdfError.message || sdfError.toString() || 'Unknown error'} (endpoint: /api/generate-sdfs, SMILES count: ${smilesArray.length}, input: "${value}")`;
-              if (isDev) console.error('[handleTextPrediction] SDF generation error', {
-                sdfError,
-                errorDetails,
-                smilesArray,
-                columnId,
-                function: 'generateSDFs',
-                endpoint: '/api/generate-sdfs'
-              });
+              const errorMsg = `generateSDFs() failed: ${sdfError.message || sdfError.toString() || 'Unknown error'} (endpoint: /api/generate-sdfs, SMILES count: ${smilesArray.length}, input: "${value}")`;
               logger.error('SDF generation failed:', sdfError);
               setError(errorMsg);
-              updateColumn(columnId, { loading: false, failed: true });
+              updateColumn(columnId, { loading: false, failed: true, errorMessage: errorMsg });
             }
           } else {
-            const isDev = process.env.NODE_ENV === 'development';
             const errorMsg = `No SMILES found in ${molecules.length} molecules from API`;
             setError(errorMsg);
-            updateColumn(columnId, { loading: false, failed: true });
+            updateColumn(columnId, { loading: false, failed: true, errorMessage: errorMsg });
           }
         }
       } else {
@@ -297,25 +344,12 @@ function App() {
       }
 
       setObjectInput('');
-      } catch (error) {
-      const isDev = process.env.NODE_ENV === 'development';
+    } catch (error) {
       const errorDetails = error.details || {};
       const isTimeout = error.message?.includes('timeout') || error.message?.includes('timed out') || errorDetails.message?.includes('timeout');
       const failedFunction = errorDetails.endpoint?.includes('generate-sdfs') ? 'generateSDFs()' : 'analyzeText()';
       const failedEndpoint = errorDetails.endpoint || '/api/structuralize';
 
-      if (isDev) {
-        console.error('[handleTextPrediction] ERROR', {
-          error,
-          errorDetails,
-          value,
-          lookupMode,
-          columnId,
-          failedFunction,
-          failedEndpoint,
-          stack: error.stack
-        });
-      }
       logger.error('Prediction failed:', error);
 
       let errorMessage;
@@ -325,18 +359,16 @@ function App() {
         errorMessage = `${failedFunction} failed: ${error.details.message} (endpoint: ${failedEndpoint}, input: "${value}")`;
       } else if (error.message) {
         errorMessage = `${failedFunction} failed: ${error.message} (endpoint: ${failedEndpoint}, input: "${value}")`;
-      } else if (error.toString) {
-        errorMessage = `${failedFunction} error: ${error.toString()} (endpoint: ${failedEndpoint}, input: "${value}")`;
       } else {
-        errorMessage = `${failedFunction} unknown error: ${JSON.stringify(error)} (endpoint: ${failedEndpoint}, input: "${value}")`;
+        errorMessage = `${failedFunction} error: ${error.toString()} (endpoint: ${failedEndpoint}, input: "${value}")`;
       }
 
       setError(errorMessage);
-      updateColumn(columnId, { loading: false, failed: true });
+      updateColumn(columnId, { loading: false, failed: true, errorMessage });
     } finally {
       setIsProcessing(false);
     }
-  }, [analyzeText, generateSDFs, columnMode, updateColumn]);
+  }, [analyzeText, generateSDFs, materialScene, columnMode, updateColumn]);
 
   const handlePredictionComplete = useCallback(async (result) => {
     const molecules = result?.molecules || result?.chemicals || [];
@@ -360,18 +392,23 @@ function App() {
           }));
           updateColumn(columnId, { viewers, loading: false, failed: false });
         } catch (sdfError) {
-          const isDev = process.env.NODE_ENV === 'development';
           const errorMsg = `SDF generation failed: ${sdfError.message || sdfError.toString() || 'Unknown error'}`;
-          if (isDev) console.error('[handlePredictionComplete] SDF error', { sdfError, smilesArray, columnId });
           logger.error('SDF generation failed:', sdfError);
           setError(errorMsg);
-          updateColumn(columnId, { loading: false, failed: true });
+          updateColumn(columnId, { loading: false, failed: true, errorMessage: errorMsg });
+          return;
         }
       } else {
-        updateColumn(columnId, { loading: false, failed: true });
+        const errorMsg = 'No valid SMILES found in analysis results';
+        setError(errorMsg);
+        updateColumn(columnId, { loading: false, failed: true, errorMessage: errorMsg });
+        return;
       }
     } else {
-      updateColumn(columnId, { loading: false, failed: true });
+      const errorMsg = 'No molecules identified in image';
+      setError(errorMsg);
+      updateColumn(columnId, { loading: false, failed: true, errorMessage: errorMsg });
+      return;
     }
     setError('');
   }, [generateSDFs, cameraMode, columnMode, updateColumn]);
@@ -461,6 +498,7 @@ function App() {
                       onSubmit={handleTextPrediction}
                       isProcessing={isProcessing}
                       error={error}
+                      history={columns}
                     />
 
                     <ModeSelector
@@ -607,6 +645,7 @@ function App() {
               onSubmit={handleTextPrediction}
               isProcessing={isProcessing}
               error={error}
+              history={columns}
             />
 
             <ModeSelector

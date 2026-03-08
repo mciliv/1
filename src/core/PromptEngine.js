@@ -31,6 +31,18 @@ class PromptEngine {
       base: nameBase,
       validation: (result) => this._validateNameResponse(result)
     });
+
+    const materialPhysicsBase = this._loadPromptFile('material_physics.txt');
+    this._templates.set('material_physics', {
+      base: materialPhysicsBase,
+      validation: (result) => this._validateMaterialPhysicsResponse(result)
+    });
+
+    const deliveryBase = this._loadPromptFile('delivery_analysis.txt');
+    this._templates.set('delivery_analysis', {
+      base: deliveryBase,
+      validation: (result) => this._validateDeliveryResponse(result)
+    });
   }
 
   /**
@@ -90,6 +102,24 @@ GUIDANCE:
              box.width > 0 && box.height > 0;
     }
     
+    return true;
+  }
+
+  _validateMaterialPhysicsResponse(response) {
+    if (!response || typeof response !== 'object') return false;
+    if (!response.object || typeof response.object !== 'string') return false;
+    const validModes = ['crystal', 'liquid', 'gas', 'molecule', 'text'];
+    if (!validModes.includes(response.visualization_mode)) return false;
+    return true;
+  }
+
+  _validateDeliveryResponse(response) {
+    if (!response || typeof response !== 'object') return false;
+    if (!response.item || typeof response.item !== 'string') return false;
+    if (!response.growable || typeof response.growable !== 'object') return false;
+    if (!Array.isArray(response.purchase_options)) return false;
+    const validStrategies = ['buy', 'grow', 'both'];
+    if (!validStrategies.includes(response.recommended_strategy)) return false;
     return true;
   }
 
@@ -167,6 +197,28 @@ GUIDANCE:
   }
 
   /**
+   * Generate a prompt for material physics analysis
+   */
+  generateMaterialPhysicsPrompt(objectDescription) {
+    const template = this._templates.get('material_physics');
+    return [
+      template.base,
+      `Object: ${objectDescription}`
+    ].filter(Boolean).join('\n\n');
+  }
+
+  generateDeliveryPrompt(item, location = {}) {
+    const template = this._templates.get('delivery_analysis');
+    const parts = [template.base, `Item: ${item}`];
+    if (location.city) {
+      parts.push(`Location: ${location.city}`);
+    } else if (location.lat !== undefined && location.lng !== undefined) {
+      parts.push(`Location: lat ${location.lat}, lng ${location.lng}`);
+    }
+    return parts.filter(Boolean).join('\n\n');
+  }
+
+  /**
    * Get available prompt types
    */
   getAvailablePrompts() {
@@ -181,7 +233,9 @@ GUIDANCE:
     const typeMap = {
       'chemical': 'chemical_analysis',
       'detection': 'object_detection',
-      'name': 'name_resolution'
+      'name': 'name_resolution',
+      'material': 'material_physics',
+      'delivery': 'delivery_analysis'
     };
 
     const fullType = typeMap[promptType] || promptType;

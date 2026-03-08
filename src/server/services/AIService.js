@@ -1,518 +1,298 @@
 /**
- * AI SERVICE ARCHITECTURE PRINCIPLES
- * =================================
+ * AIService - Multi-model priority queue with automatic fallback
  *
- * This service implements three fundamental principles that MUST be maintained:
+ * Models are tried in priority order. On rate-limit (429) or availability
+ * errors, the next model in the queue is attempted automatically.
  *
- * 1. ENVIRONMENT VARIABLE EXCLUSIVITY
- *    The .env file is the SOLE source of configuration. Every AI setting comes from process.env.
+ * Configuration is env-driven. Set keys for the providers you want:
+ *   OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, XAI_API_KEY
  *
- * 2. SDK ABSTRACTION PURITY
- *    All AI interactions use @ai-sdk's unified interface. Zero direct provider API calls.
+ * Priority order is configurable via AI_PRIORITY (comma-separated):
+ *   AI_PRIORITY=anthropic,openai,google,xai
  *
- * 3. SDK RELIABILITY MAXIMIZATION
- *    Leverage SDKs for automatic model versioning, API compatibility, and reliability features.
- *
- * WHY THESE PRINCIPLES MATTER:
- * ===========================
- * - Future-proofs against API changes and model deprecations
- * - Enables seamless provider switching without code changes
- * - Prevents configuration drift and hardcoded model dependencies
- * - Automatic adoption of latest models and performance improvements
- * - SDK handles rate limiting, retries, and error recovery
- *
- * REQUIRED BEHAVIORS:
- * ===================
- * ✅ ALWAYS load config from process.env variables
- * ✅ ALWAYS use @ai-sdk generateText() for AI calls
- * ✅ ALWAYS call _createProviderConfigs() for configuration
- * ✅ ALWAYS use _convertToSDKFormat() for parameter conversion
- *
- * CONSEQUENCES OF VIOLATION:
- * ==========================
- * Breaking these principles will cause:
- * - Provider switching failures
- * - Configuration inconsistencies
- * - API migration nightmares
- * - Maintenance overhead
- *
- * EXAMPLES OF CORRECT USAGE:
- * ==========================
- *
- * ✅ Configuration:
- *    this.providerConfigs = this._createProviderConfigs();
- *
- * ✅ AI Calls:
- *    const result = await generateText({ model: this.model, ...params });
- *
- * ❌ WRONG - Never do this:
- *    const client = new OpenAI(); // Direct SDK usage
- *    const result = client.responses.create(); // Raw API calls
- *    const config = { apiKey: 'hardcoded' }; // Hardcoded values
+ * Task-specific routing via AI_TASK_<TASK>=<provider>:
+ *   AI_TASK_CHEMISTRY=anthropic
+ *   AI_TASK_VISION=google
  */
+
+const PROVIDER_REGISTRY = {
+  openai: {
+    envKey: 'OPENAI_API_KEY',
+    envModel: 'OPENAI_MODEL',
+    defaultModel: 'gpt-4o',
+    factory: (model, apiKey) => {
+      const { openai } = require('@ai-sdk/openai');
+      return openai(model, { apiKey });
+    }
+  },
+  anthropic: {
+    envKey: 'ANTHROPIC_API_KEY',
+    envModel: 'ANTHROPIC_MODEL',
+    defaultModel: 'claude-sonnet-4-20250514',
+    factory: (model, apiKey) => {
+      const { anthropic } = require('@ai-sdk/anthropic');
+      return anthropic(model, { apiKey });
+    }
+  },
+  google: {
+    envKey: 'GOOGLE_API_KEY',
+    envModel: 'GOOGLE_MODEL',
+    defaultModel: 'gemini-2.0-flash',
+    factory: (model, apiKey) => {
+      const { google } = require('@ai-sdk/google');
+      return google(model, { apiKey });
+    }
+  },
+  xai: {
+    envKey: 'XAI_API_KEY',
+    envModel: 'XAI_MODEL',
+    defaultModel: 'grok-3',
+    factory: (model, apiKey) => {
+      const { xai } = require('@ai-sdk/xai');
+      return xai(model, { apiKey });
+    }
+  }
+};
+
+const DEFAULT_PRIORITY = ['openai', 'anthropic', 'google', 'xai'];
+
 class AIService {
   constructor() {
-    // REQUIRED: Load ONLY from environment variables
-    // This maintains the single source of truth principle
-    const isTest = process.env.NODE_ENV === 'test';
-
-    this.config = {
-      provider: process.env.AI_PROVIDER || 'openai'
-    };
-
-    // Provider-specific configurations loaded from .env
-    // Test environment always uses mock-model regardless of .env settings
-    this.providerConfigs = this._createProviderConfigs();
-
-    this.model = null;
-    // CRITICAL: ONLY initialize model - NO client initialization
-    // FORBIDDEN: Do NOT initialize raw provider clients
-    this.initializeModel();
+    this.isTest = process.env.NODE_ENV === 'test';
+    this.providers = this._buildProviders();
+    this.priority = this._buildPriority();
+    this.cooldowns = new Map();
+    this.config = { provider: this.priority[0] || 'openai' };
+    this.model = this.providers.get(this.config.provider)?.model || null;
   }
 
+  _buildProviders() {
+    const providers = new Map();
 
-  /**
-   * Get default base URL for a provider
-   */
-  _getDefaultBaseURL() {
-    const defaults = {
-      openai: 'https://api.openai.com/v1',
-      xai: 'https://api.x.ai/v1'
-    };
-    return defaults[this.config.provider] || 'https://api.openai.com/v1';
-  }
-
-  /**
-   * Get current provider config
-   */
-  _getCurrentProviderConfig() {
-    return this.providerConfigs[this.config.provider] || this.providerConfigs.openai;
-  }
-
-  /**
-   * CONFIGURATION FACTORY - SINGLE SOURCE OF TRUTH
-   *
-   * This method is the EXCLUSIVE source for all AI provider configuration.
-   * Every config decision flows through here.
-   *
-   * REQUIRED BEHAVIORS:
-   * - Read ONLY from process.env
-   - Return consistent config objects
-   - Handle test/prod differences here only
-   *
-   * WHY CENTRALIZED:
-   * - Prevents config drift across the codebase
-   - Enables atomic config changes
-   - Maintains provider abstraction
-   - Leverages SDK reliability features (auto model versioning, rate limiting, retries)
-   *
-   * USAGE: Call this method whenever provider config is needed
-   */
-  _createProviderConfigs() {
-    return {
-      openai: this._createProviderConfig('OPENAI'),
-      xai: this._createProviderConfig('XAI')
-    };
-  }
-
-  /**
-   * PROVIDER CONFIGURATION HELPER - DRY CONFIGURATION
-   *
-   * Creates standardized configuration for any AI provider.
-   * Eliminates duplication and ensures consistency.
-   *
-   * @param {string} prefix - Environment variable prefix ('OPENAI' or 'XAI')
-   * @returns {object} Provider configuration object
-   */
-  _createProviderConfig(prefix) {
-    const isTest = process.env.NODE_ENV === 'test';
-    const envKey = `${prefix}_API_KEY`;
-    const envModel = `${prefix}_MODEL`;
-
-    return {
-      apiKey: process.env[envKey],
-      // SDK automatically resolves 'latest' to newest available model
-      model: process.env[envModel] || (isTest ? 'mock-model' : 'latest'),
-      timeout: isTest ? 1000 : 30000
-    };
-  }
-
-  /**
-   * MODEL INITIALIZATION - SDK ABSTRACTION LAYER
-   *
-   * Creates @ai-sdk model instances for unified AI interactions.
-   * This is the ONLY initialization needed - no raw clients required.
-   *
-   * BENEFITS:
-   * - Automatic provider abstraction
-   * - Consistent API across all providers
-   * - Future-proof against SDK changes
-   *
-   * RESULT: this.model ready for generateText() calls
-   */
-  initializeModel() {
-    const providerConfig = this._getCurrentProviderConfig();
-
-    if (!providerConfig.apiKey) {
-      throw new Error(`${this.config.provider.toUpperCase()} API key is required`);
+    if (this.isTest) {
+      providers.set('mock', { name: 'mock', model: 'mock-model', modelId: 'mock-model' });
+      return providers;
     }
 
-    // CRITICAL: Use ONLY @ai-sdk unified interface - NO provider-specific logic
-    // FORBIDDEN: Do NOT switch on provider type - @ai-sdk handles this abstraction
-    switch (this.config.provider) {
-      case 'openai':
-        const { openai } = require('@ai-sdk/openai');
-        this.model = openai(providerConfig.model, {
-          apiKey: providerConfig.apiKey
-        });
-        break;
-      case 'xai':
-        const { xai } = require('@ai-sdk/xai');
-        this.model = xai(providerConfig.model, {
-          apiKey: providerConfig.apiKey
-        });
-        break;
-      default:
-        throw new Error(`Unsupported provider: ${this.config.provider}`);
+    for (const [name, reg] of Object.entries(PROVIDER_REGISTRY)) {
+      const apiKey = process.env[reg.envKey];
+      if (!apiKey) continue;
+
+      const modelId = process.env[reg.envModel] || reg.defaultModel;
+      try {
+        const model = reg.factory(modelId, apiKey);
+        providers.set(name, { name, model, modelId });
+      } catch (err) {
+        console.warn(`[AIService] Failed to init ${name}: ${err.message}`);
+      }
     }
+
+    return providers;
   }
 
-  /**
-   * UNIFIED AI INTERFACE - EXTERNAL API
-   *
-   * This is the ONLY public method for AI interactions.
-   * All complexity is abstracted away - callers get consistent results.
-   *
-   * INPUT: Standard params (messages, input, temperature, etc.)
-   * OUTPUT: Normalized response (content, usage, metadata)
-   *
-   * WHY UNIFIED:
-   * - Same interface regardless of provider
-   * - Automatic format conversion
-   * - Consistent error handling
-   * - Provider switching transparency
-   */
+  _buildPriority() {
+    if (this.isTest) return ['mock'];
+
+    const envPriority = process.env.AI_PRIORITY;
+    const order = envPriority
+      ? envPriority.split(',').map(s => s.trim().toLowerCase())
+      : DEFAULT_PRIORITY;
+
+    const available = order.filter(p => this.providers.has(p));
+
+    if (available.length === 0) {
+      throw new Error(
+        'No AI providers configured. Set at least one API key: ' +
+        Object.values(PROVIDER_REGISTRY).map(r => r.envKey).join(', ')
+      );
+    }
+
+    console.log(`[AIService] Priority queue: ${available.join(' > ')} (${available.length} providers)`);
+    return available;
+  }
+
+  _getTaskProvider(taskType) {
+    if (!taskType) return null;
+    const preferred = process.env[`AI_TASK_${taskType.toUpperCase()}`]?.toLowerCase();
+    if (preferred && this.providers.has(preferred) && !this._isOnCooldown(preferred)) {
+      return preferred;
+    }
+    return null;
+  }
+
+  _isOnCooldown(providerName) {
+    const until = this.cooldowns.get(providerName);
+    if (!until) return false;
+    if (Date.now() >= until) {
+      this.cooldowns.delete(providerName);
+      return false;
+    }
+    return true;
+  }
+
+  _setCooldown(providerName, retryAfterSeconds) {
+    const duration = (retryAfterSeconds || 60) * 1000;
+    this.cooldowns.set(providerName, Date.now() + duration);
+    console.warn(`[AIService] ${providerName} rate-limited, cooldown ${retryAfterSeconds || 60}s`);
+  }
+
+  _isRetryableError(error) {
+    const status = error.status || error.statusCode || error.code;
+    if ([429, 503, 529].includes(status)) return true;
+    const msg = (error.message || '').toLowerCase();
+    return msg.includes('rate limit') || msg.includes('overloaded') || msg.includes('capacity');
+  }
+
+  _getRetryAfter(error) {
+    if (error.headers?.['retry-after']) return parseInt(error.headers['retry-after'], 10);
+    if (error.retryAfter) return error.retryAfter;
+    return 60;
+  }
+
   async callAPI(params, options = {}) {
-    try {
-      // CRITICAL: Use ONLY @ai-sdk generateText for complete abstraction
-      const result = await this._callWithSDK(params);
-      const parsed = this._parseSDKResponse(result);
-      return parsed;
-    } catch (error) {
-      throw error;
+    if (this.isTest) return this._getMockResponse(params);
+
+    const { taskType, provider: forceProvider } = options;
+    const tryOrder = this._resolveOrder(taskType, forceProvider);
+    let lastError = null;
+
+    for (const providerName of tryOrder) {
+      const provider = this.providers.get(providerName);
+      if (!provider) continue;
+
+      try {
+        const result = await this._callProvider(provider, params);
+        this.config.provider = providerName;
+        this.model = provider.model;
+        return this._parseResponse(result);
+      } catch (error) {
+        lastError = error;
+        if (this._isRetryableError(error)) {
+          this._setCooldown(providerName, this._getRetryAfter(error));
+          continue;
+        }
+        throw error;
+      }
     }
+
+    throw lastError || new Error('All AI providers exhausted');
   }
 
-  /**
-   * SDK EXECUTION LAYER - CORE AI INTERACTION
-   *
-   * This method contains the actual @ai-sdk generateText() call.
-   * It's the bridge between internal format and SDK expectations.
-   *
-   * FLOW:
-   * 1. Check for test mocks
-   * 2. Convert internal params to SDK format
-   * 3. Call generateText()
-   * 4. Return unified response
-   *
-   * WHY ISOLATED:
-   * - Contains all SDK-specific logic
-   * - Easy to test and mock
-   * - Single point for SDK updates
-   * - Leverages SDK reliability: automatic retries, rate limiting, error recovery
-   */
-  async _callWithSDK(params) {
-    const { generateText } = require('ai');
-
-    // Handle mock model for testing
-    if (this._getCurrentProviderConfig().model === 'mock-model') {
-      return this._getMockResponse(params);
+  _resolveOrder(taskType, forceProvider) {
+    if (forceProvider && this.providers.has(forceProvider)) {
+      const rest = this.priority.filter(p => p !== forceProvider && !this._isOnCooldown(p));
+      return [forceProvider, ...rest];
     }
 
-    // Convert params to @ai-sdk format
-    const generateParams = this._convertToSDKFormat(params);
+    const taskPref = this._getTaskProvider(taskType);
+    if (taskPref) {
+      const rest = this.priority.filter(p => p !== taskPref && !this._isOnCooldown(p));
+      return [taskPref, ...rest];
+    }
+
+    return this.priority.filter(p => !this._isOnCooldown(p));
+  }
+
+  async _callProvider(provider, params) {
+    const { generateText } = require('ai');
+    const sdkParams = this._convertToSDKFormat(params);
 
     if (process.env.NODE_ENV === 'development') {
-      console.log(`[AIService:${this.config.provider}] @ai-sdk generateText request:`, {
-        model: this.model.modelId || this.model,
-        inputLength: generateParams.prompt?.length || generateParams.messages?.length,
-        maxTokens: generateParams.maxTokens
-      });
+      console.log(`[AIService] Trying ${provider.name} (${provider.modelId})`);
     }
 
-    try {
-      const result = await generateText({
-        model: this.model,
-        ...generateParams
-      });
-
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`[AIService:${this.config.provider}] @ai-sdk response received`);
-      }
-
-      return result;
-    } catch (error) {
-      console.error(`[AIService:${this.config.provider}] @ai-sdk error:`, error.message);
-      throw error;
-    }
+    return await generateText({ model: provider.model, ...sdkParams });
   }
 
-  /**
-   * PARAMETER FORMAT CONVERSION - INTERNAL ↔ SDK
-   *
-   * Translates between this service's API and @ai-sdk's expectations.
-   * Handles message format conversion and parameter mapping.
-   *
-   * INPUT: Internal format (messages/input, max_tokens, temperature, etc.)
-   * OUTPUT: @ai-sdk format (messages/prompt, maxTokens, temperature, etc.)
-   *
-   * WHY NEEDED:
-   * - Different SDKs expect different parameter names
-   * - Message format variations
-   * - Maintains clean internal API
-   */
   _convertToSDKFormat(params) {
     const sdkParams = {};
 
     if (params.messages && Array.isArray(params.messages)) {
-      // Convert to @ai-sdk messages format
       sdkParams.messages = params.messages.map(msg => ({
         role: msg.role || 'user',
         content: msg.content || ''
       }));
     } else {
-      // Use prompt format
       sdkParams.prompt = params.input || params.prompt || '';
     }
 
-    // Add optional parameters if provided
     if (params.max_tokens) sdkParams.maxTokens = params.max_tokens;
     if (params.temperature !== undefined) sdkParams.temperature = params.temperature;
     if (params.top_p !== undefined) sdkParams.topP = params.top_p;
-    if (params.stream !== undefined) sdkParams.stream = params.stream;
 
     return sdkParams;
   }
 
-  /**
-   * Get mock response for testing
-   *
-   * CRITICAL: This is ONLY for testing - NO production mock responses
-   * FORBIDDEN: Do NOT use this outside of test environments
-   */
-  _getMockResponse(params) {
+  _parseResponse(response) {
+    if (!response?.text) {
+      throw new Error('Invalid AI response: missing text field');
+    }
+
+    let content = response.text.trim();
+    if (!content) throw new Error('Empty response from AI');
+
+    content = content.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+    try {
+      return JSON.parse(content);
+    } catch {
+      return {
+        content,
+        role: 'assistant',
+        finish_reason: response.finishReason || 'stop',
+        usage: response.usage,
+        model: this.getModel()
+      };
+    }
+  }
+
+  _getMockResponse() {
     return {
-      text: 'This is a mock response for testing purposes.',
+      text: 'Mock response for testing.',
       finishReason: 'stop',
-      usage: {
-        promptTokens: 10,
-        completionTokens: 20,
-        totalTokens: 30
-      }
+      usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }
     };
   }
 
+  getProvider() { return this.config.provider; }
+  getModel() { return this.providers.get(this.config.provider)?.modelId || 'unknown'; }
 
-  /**
-   * RESPONSE NORMALIZATION - SDK ↔ INTERNAL
-   *
-   * Converts @ai-sdk responses to this service's standard format.
-   * Handles JSON parsing and metadata extraction.
-   *
-   * INPUT: @ai-sdk generateText result
-   * OUTPUT: Normalized response object with content, usage, metadata
-   *
-   * WHY IMPORTANT:
-   * - Consistent response format for all callers
-   * - Automatic JSON parsing for structured outputs
-   * - Unified error handling
-   */
-  _parseSDKResponse(response) {
-    try {
-      // CRITICAL: Handle ONLY @ai-sdk generateText response format
-      // FORBIDDEN: Do NOT parse raw provider API responses
-
-      if (!response?.text) {
-        throw new Error('Invalid @ai-sdk response: missing text field');
-      }
-
-      let content = response.text.trim();
-      if (!content) {
-        throw new Error('Empty response content from AI');
-      }
-
-      // Strip markdown fences if the AI wrapped JSON in ```json ... ```
-      // Prompt: chemical_analysis.txt says "no markdown" but models often ignore this
-      content = content.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-
-      // Try to parse as JSON first
-      try {
-        const parsedJson = JSON.parse(content);
-        return parsedJson;
-      } catch {
-        // Return structured response if not JSON
-        return {
-          content: content,
-          role: 'assistant',
-          finish_reason: response.finishReason || 'stop',
-          usage: response.usage,
-          model: this._getCurrentProviderConfig().model
-        };
-      }
-    } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error(`[AIService:${this.config.provider}] Failed to parse response:`, {
-          error: error.message,
-          responseStructure: {
-            hasOutputText: !!response?.output_text,
-            hasChoices: !!response?.choices,
-            choiceCount: response?.choices?.length,
-            firstChoice: response?.choices?.[0] ? {
-              hasMessage: !!response.choices[0].message,
-              hasText: !!response.choices[0].text,
-              hasContent: !!(response.choices[0].message?.content || response.choices[0].text)
-            } : null
-          }
-        });
-      }
-      throw error;
+  getStatus() {
+    const status = {};
+    for (const [name, provider] of this.providers) {
+      status[name] = {
+        model: provider.modelId,
+        available: !this._isOnCooldown(name),
+        cooldownUntil: this.cooldowns.get(name) || null,
+        priority: this.priority.indexOf(name)
+      };
     }
+    return status;
   }
 
-
-
-  /**
-   * Get current provider name
-   */
-  getProvider() {
-    return this.config.provider;
-  }
-
-  /**
-   * Get current model
-   */
-  getModel() {
-    return this._getCurrentProviderConfig().model;
-  }
-
-  /**
-   * PROVIDER SWITCHING - RUNTIME RECONFIGURATION
-   *
-   * Enables changing AI providers without service restart.
-   * Reloads all configuration from environment variables.
-   *
-   * PROCESS:
-   * 1. Validate new provider exists
-   * 2. Reload all config from .env
-   * 3. Reinitialize model with new provider
-   *
-   * BENEFITS:
-   * - Zero-downtime provider switching
-   * - Automatic config refresh
-   * - Consistent state after switch
-   */
   switchProvider(newProvider) {
-    if (!this.providerConfigs[newProvider]) {
-      throw new Error(`Unsupported provider: ${newProvider}. Supported: ${Object.keys(this.providerConfigs).join(', ')}`);
+    if (!this.providers.has(newProvider)) {
+      throw new Error(`Unknown provider: ${newProvider}. Available: ${[...this.providers.keys()].join(', ')}`);
     }
-
-    // Always reload fresh config from environment
     this.config.provider = newProvider;
-    this.providerConfigs = this._createProviderConfigs();
-
-    // Reinitialize with new provider settings
-    this.initializeModel();
+    this.model = this.providers.get(newProvider).model;
   }
 
-  /**
-   * Health check to validate API connectivity and contract
-   */
   async healthCheck() {
     try {
       const response = await this.callAPI({
         messages: [{ role: 'user', content: 'Hello' }],
         max_tokens: 5
       });
-      return { status: 'healthy', response };
+      return { status: 'healthy', provider: this.config.provider, response };
     } catch (error) {
       return { status: 'unhealthy', error: error.message };
     }
   }
 
-  /**
-   * Get available providers
-   */
   static getAvailableProviders() {
-    return ['openai', 'xai'];
-  }
-
-  /**
-   * LEGACY PROVIDER DEFAULTS - DO NOT USE FOR AI CONFIGURATION
-   *
-   * WARNING: This method contains OUTDATED hardcoded values and exists ONLY for legacy compatibility.
-   *
-   * CRITICAL RESTRICTIONS:
-   * - NEVER use for actual LLM configuration
-   * - NEVER reference model names from this method
-   * - NEVER use for runtime decisions
-   *
-   * CORRECT APPROACH:
-   * - Use _createProviderConfigs() for all AI configuration
-   * - Let SDKs handle model versioning automatically
-   * - Configure via environment variables only
-   *
-   * This method will be removed in future versions.
-   */
-  static getProviderDefaults(provider) {
-    // NOTE: These values are intentionally outdated to prevent misuse
-    const legacyDefaults = {
-      openai: {
-        baseURL: 'https://api.openai.com/v1',
-        model: 'gpt-3.5-turbo'  // LEGACY - Do not use
-      },
-      xai: {
-        baseURL: 'https://api.x.ai/v1',
-        model: 'grok-3'  // LEGACY - Do not use
-      }
-    };
-    return legacyDefaults[provider] || legacyDefaults.openai;
+    return Object.keys(PROVIDER_REGISTRY);
   }
 }
-
-// ARCHITECTURE ENFORCEMENT PRINCIPLES
-// ===================================
-//
-// This implementation follows evidence-based software architecture principles:
-//
-// 1. SINGLE SOURCE OF TRUTH
-//    - All configuration flows from .env file
-//    - Prevents configuration drift and inconsistencies
-//    - Enables atomic configuration changes
-//
-// 2. MAXIMUM ABSTRACTION
-//    - Zero direct provider API calls
-//    - Unified interface via @ai-sdk
-//    - Future-proofs against API changes
-//
-// 3. SDK RELIABILITY MAXIMIZATION
-//    - Automatic model versioning and updates
-//    - Built-in rate limiting and retry logic
-//    - Error handling and recovery
-//    - Performance optimizations
-//
-// 4. CLEAN ARCHITECTURE
-//    - Clear separation between configuration, execution, and response handling
-//    - Dependency injection through environment variables
-//    - Testable components with clear boundaries
-//
-// MAINTENANCE GUIDELINES:
-// ======================
-// When modifying this service, always ask:
-// - Does this maintain single source of truth?
-// - Does this preserve SDK abstraction?
-// - Does this maximize SDK reliability features?
-// - Does this keep the architecture clean?
-//
-// If the answer is no to any question, reconsider the approach.
 
 module.exports = AIService;

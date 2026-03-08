@@ -12,6 +12,7 @@ class Structuralizer {
     this.logger = dependencies.logger;
 
     // Optional dependencies
+    this.materialSceneBuilder = dependencies.materialSceneBuilder || null;
     this.cache = dependencies.cache || null;
     
     // Configuration
@@ -164,6 +165,143 @@ class Structuralizer {
       recommendedBox,
       reason: predictionResult.reason || reason
     };
+  }
+
+  /**
+   * Analyze material physics for a given object text.
+   * Returns visualization_mode and scene data for crystal/liquid/gas,
+   * or falls through to molecule mode.
+   */
+  async materialScene(objectText) {
+    const trimmed = (objectText || '').trim();
+    if (!trimmed) {
+      return { visualization_mode: 'molecule', object: trimmed };
+    }
+
+    // Detect protein/PDB inputs before hitting the AI pipeline
+    const proteinMatch = this._detectProtein(trimmed);
+    if (proteinMatch) {
+      return {
+        visualization_mode: 'protein',
+        object: trimmed,
+        pdbId: proteinMatch.pdbId,
+        proteinName: proteinMatch.name,
+        description: `Protein structure: ${proteinMatch.name} (PDB: ${proteinMatch.pdbId})`
+      };
+    }
+
+    try {
+      const result = await this._analyzeMaterialPhysics(trimmed);
+
+      const mode = result.visualization_mode;
+      if ((mode === 'crystal' || mode === 'liquid' || mode === 'gas') && this.materialSceneBuilder) {
+        const sceneData = this.materialSceneBuilder.build(result);
+        if (sceneData) {
+          return {
+            visualization_mode: mode,
+            object: result.object || trimmed,
+            sceneData,
+            description: result.description,
+            reason: result.reason
+          };
+        }
+      }
+
+      // text or molecule mode, or no scene builder
+      return {
+        visualization_mode: mode,
+        object: result.object || trimmed,
+        description: result.description,
+        textDescription: mode === 'text' ? result.description : undefined,
+        reason: result.reason
+      };
+    } catch (err) {
+      this.logger.warn('Material physics analysis failed, falling back to molecule mode', { error: err.message });
+      return { visualization_mode: 'molecule', object: trimmed };
+    }
+  }
+
+  /**
+   * Detect if input refers to a known protein. Returns { pdbId, name } or null.
+   * Matches explicit PDB IDs (e.g. "1CRN", "pdb 4HHB") and common protein names.
+   * @private
+   */
+  _detectProtein(text) {
+    const lower = text.toLowerCase().trim();
+
+    // Explicit PDB ID pattern: 4-character alphanumeric starting with digit
+    const pdbExplicit = lower.match(/^(?:pdb[:\s-]*)?([0-9][a-z0-9]{3})$/i);
+    if (pdbExplicit) {
+      return { pdbId: pdbExplicit[1].toUpperCase(), name: pdbExplicit[1].toUpperCase() };
+    }
+
+    // Well-known proteins mapped to representative PDB entries
+    const knownProteins = {
+      'hemoglobin': { pdbId: '4HHB', name: 'Hemoglobin' },
+      'haemoglobin': { pdbId: '4HHB', name: 'Hemoglobin' },
+      'insulin': { pdbId: '4INS', name: 'Insulin' },
+      'myoglobin': { pdbId: '1MBN', name: 'Myoglobin' },
+      'lysozyme': { pdbId: '1LYZ', name: 'Lysozyme' },
+      'collagen': { pdbId: '1CAG', name: 'Collagen' },
+      'keratin': { pdbId: '6EC0', name: 'Keratin' },
+      'actin': { pdbId: '1ATN', name: 'Actin' },
+      'tubulin': { pdbId: '1TUB', name: 'Tubulin' },
+      'albumin': { pdbId: '1AO6', name: 'Human Serum Albumin' },
+      'serum albumin': { pdbId: '1AO6', name: 'Human Serum Albumin' },
+      'green fluorescent protein': { pdbId: '1EMA', name: 'Green Fluorescent Protein' },
+      'gfp': { pdbId: '1EMA', name: 'Green Fluorescent Protein' },
+      'cytochrome c': { pdbId: '1HRC', name: 'Cytochrome C' },
+      'ubiquitin': { pdbId: '1UBQ', name: 'Ubiquitin' },
+      'trypsin': { pdbId: '1TRN', name: 'Trypsin' },
+      'catalase': { pdbId: '1DGH', name: 'Catalase' },
+      'ferritin': { pdbId: '1FHA', name: 'Ferritin' },
+      'rhodopsin': { pdbId: '1F88', name: 'Rhodopsin' },
+      'p53': { pdbId: '1TUP', name: 'p53 Tumor Suppressor' },
+      'crambin': { pdbId: '1CRN', name: 'Crambin' },
+      'dna polymerase': { pdbId: '1TAU', name: 'DNA Polymerase' },
+      'rna polymerase': { pdbId: '1I6H', name: 'RNA Polymerase' },
+      'atp synthase': { pdbId: '1E79', name: 'ATP Synthase' },
+      'spike protein': { pdbId: '6VXX', name: 'SARS-CoV-2 Spike Protein' },
+      'cas9': { pdbId: '4OO8', name: 'CRISPR-Cas9' },
+      'crispr': { pdbId: '4OO8', name: 'CRISPR-Cas9' },
+      'nattokinase': { pdbId: '4DWW', name: 'Nattokinase' },
+      'subtilisin': { pdbId: '4DWW', name: 'Subtilisin NAT (Nattokinase)' },
+    };
+
+    if (knownProteins[lower]) {
+      return knownProteins[lower];
+    }
+
+    // Partial match: "human hemoglobin", "bovine insulin", etc.
+    for (const [key, val] of Object.entries(knownProteins)) {
+      if (lower.includes(key)) {
+        return val;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * @private
+   */
+  async _analyzeMaterialPhysics(objectText) {
+    const prompt = this.promptEngine.generateMaterialPhysicsPrompt(objectText);
+
+    const result = await this._callAI({
+      messages: [
+        { role: 'system', content: 'You are a materials science API. Always respond with valid JSON only, no markdown, no commentary.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 4000,
+      temperature: 1.0
+    });
+
+    if (!this.promptEngine.validateResponse('material', result)) {
+      throw new Error('Invalid material physics response from AI');
+    }
+
+    return result;
   }
 
   /**

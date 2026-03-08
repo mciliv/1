@@ -19,7 +19,7 @@ describe('AIService (@ai-sdk wrapper) - unit', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv };
-    process.env.NODE_ENV = 'test';
+    process.env.NODE_ENV = 'development';
     process.env.AI_PROVIDER = 'openai';
     process.env.OPENAI_API_KEY = 'test-openai-key';
   });
@@ -28,9 +28,12 @@ describe('AIService (@ai-sdk wrapper) - unit', () => {
     process.env = originalEnv;
   });
 
-  test('throws if provider API key is missing', () => {
+  test('throws if no provider API keys are set', () => {
     delete process.env.OPENAI_API_KEY;
-    expect(() => new AIService()).toThrow('OPENAI API key is required');
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GOOGLE_AI_API_KEY;
+    delete process.env.XAI_API_KEY;
+    expect(() => new AIService()).toThrow('No AI providers configured');
   });
 
   test('parses JSON from @ai-sdk response text', async () => {

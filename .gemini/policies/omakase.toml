@@ -1,0 +1,12 @@
+# Omakase Setup: Auto-approve safe read/search tools
+[[rule]]
+toolName = ["read_file", "glob", "grep_search", "list_directory", "cli_help", "codebase_investigator"]
+decision = "allow"
+priority = 100
+
+# Omakase Setup: Auto-approve common git and discovery commands
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["git status", "git diff", "git log", "ls", "cat"]
+decision = "allow"
+priority = 50

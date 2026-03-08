@@ -109,7 +109,22 @@ async function createApp({ config, logger, container }) {
     }
   });
 
+  app.get('/api/ai/status', async (req, res) => {
+    try {
+      const aiService = await container.get('aiService');
+      res.json({
+        activeProvider: aiService.getProvider(),
+        activeModel: aiService.getModel(),
+        priority: aiService.priority,
+        providers: aiService.getStatus()
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   await setupChemicalPredictionRoutes(app, { logger, container });
+  await setupDeliveryRoutes(app, { logger, container });
   await setupDatabaseRecommendationRoutes(app, { logger, container });
 
   // Setup hotel routes (secure video hosting and request card)
@@ -273,6 +288,26 @@ async function setupChemicalPredictionRoutes(app, { logger, container }) {
     }
   });
 
+  // Material scene endpoint - returns visualization mode and scene data
+  app.post('/api/material-scene', async (req, res, next) => {
+    try {
+      const { text } = req.body;
+
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({
+          error: 'Missing or invalid "text" parameter',
+        });
+      }
+
+      logger.info(`Material scene request: "${text}"`);
+
+      const result = await structuralizer.materialScene(text.trim());
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // SDF generation endpoint
   app.post('/api/generate-sdfs', async (req, res, next) => {
     try {
@@ -418,6 +453,35 @@ async function setupChemicalPredictionRoutes(app, { logger, container }) {
   });
 }
 
+async function setupDeliveryRoutes(app, { logger, container }) {
+  const deliveryService = await container.get('deliveryService');
+
+  app.post('/api/delivery/analyze', async (req, res, next) => {
+    try {
+      const { item, city, lat, lng } = req.body;
+
+      if (!item || typeof item !== 'string') {
+        return res.status(400).json({
+          error: 'Missing or invalid "item" parameter',
+        });
+      }
+
+      logger.info(`Delivery analysis request: "${item}" (city: ${city || 'N/A'})`);
+
+      const result = await deliveryService.analyzeDeliveryOptions({
+        item: item.trim(),
+        city,
+        lat,
+        lng
+      });
+
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+}
+
 async function setupDatabaseRecommendationRoutes(app, { logger, container }) {
   const DatabaseRecommender = require('../services/database-recommender');
   const aiService = await container.get('aiService');
@@ -485,6 +549,7 @@ async function setupDatabaseRecommendationRoutes(app, { logger, container }) {
 module.exports = {
   createApp,
   setupChemicalPredictionRoutes,
+  setupDeliveryRoutes,
   setupDatabaseRecommendationRoutes,
 };
 

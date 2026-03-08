@@ -322,6 +322,38 @@ export const useApi = () => {
     });
   }, [apiCall]);
 
+  const materialScene = useCallback(async (text) => {
+    const trimmedText = (text || '').trim();
+    if (!trimmedText) throw new Error('Text is required');
+
+    return apiCall('/api/material-scene', {
+      method: 'POST',
+      body: JSON.stringify({ text: trimmedText }),
+      maxRetries: 1,
+      cachePost: true,
+      cacheDuration: 600000,
+    });
+  }, [apiCall]);
+
+  const analyzeDelivery = useCallback(async (item, location = {}) => {
+    if (!item || typeof item !== 'string' || item.trim().length === 0) {
+      throw new Error('Item name is required');
+    }
+
+    return apiCall('/api/delivery/analyze', {
+      method: 'POST',
+      body: JSON.stringify({
+        item: item.trim(),
+        city: location.city,
+        lat: location.lat,
+        lng: location.lng
+      }),
+      maxRetries: 1,
+      cachePost: true,
+      cacheDuration: 600000,
+    });
+  }, [apiCall]);
+
   const clearError = useCallback(() => {
     setError(null);
   }, []);
@@ -348,6 +380,8 @@ export const useApi = () => {
     analyzeText: structuralizeText,
     structuresFromText: structuralizeText,
     analyzeImage: structuralizeImage,
+    materialScene,
+    analyzeDelivery,
     generateSDFs,
     nameToSdf,
     clearError,

@@ -33,9 +33,9 @@ function buildArgs({ city, lat, lng, limit, ingredientsPath, citiesPath }) {
 function resolveRubyPaths() {
   const root = path.join(__dirname, '..', '..', '..');
   return {
-    binary: path.join(root, 'ruby_app', 'bin', 'ingredient_delivery'),
-    ingredientsPath: path.join(root, 'ruby_app', 'data', 'ingredients.json'),
-    citiesPath: path.join(root, 'ruby_app', 'data', 'cities.json')
+    binary: path.join(root, 'delivery', 'bin', 'ingredient_delivery'),
+    ingredientsPath: path.join(root, 'delivery', 'data', 'ingredients.json'),
+    citiesPath: path.join(root, 'delivery', 'data', 'cities.json')
   };
 }
 
